@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=1024">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>이미지 → ASCII 아트 변환기</title>
 <style>
   :root {
@@ -75,6 +75,7 @@
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   .output-wrap {
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
     background: #ffffff;
     border-radius: 8px;
     border: 1px solid var(--border);
@@ -151,6 +152,34 @@
   </div>
 
   <div class="panel">
+    <div class="toggle-row" style="margin-bottom:12px;">
+      <input type="checkbox" id="textModeCheck">
+      <label for="textModeCheck"><strong>내 글로 채우기</strong> — 직접 입력한 글로 아트를 채웁니다</label>
+    </div>
+    <div id="textModeFields" style="display:none;">
+      <p class="sub" style="margin:0 0 12px;">한글은 글자 크기가 너무 작으면(8px 미만) 뭉개져 보일 수 있습니다.</p>
+      <div class="field" style="margin-bottom:12px;">
+        <label>채울 글 (짧으면 자동으로 반복해서 채웁니다)</label>
+        <textarea id="textModeContent" rows="6" placeholder="이미지 실루엣을 채울 글을 붙여넣으세요…" style="width:100%; background:#ffffff; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px; font-family:inherit; resize:vertical;"></textarea>
+      </div>
+      <div class="controls" style="margin-bottom:0;">
+        <div class="field">
+          <label>강조할 단어/구절 (쉼표로 구분)</label>
+          <input type="text" id="textModeHighlightWords" placeholder="예: TEXT, 강조할단어">
+        </div>
+        <div class="field">
+          <label>강조 색상</label>
+          <input type="color" id="textModeHighlightColor" value="#e63946" style="height:34px; padding:2px; cursor:pointer;">
+        </div>
+        <div class="toggle-row" style="align-self:end;">
+          <input type="checkbox" id="textModeHighlightBold" checked>
+          <label for="textModeHighlightBold">강조 굵게</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
     <div class="controls">
       <div class="field">
         <label>가로 너비 (문자 수) <span class="val" id="widthVal">120</span></label>
@@ -164,7 +193,7 @@
         <label>글자 크기(px) <span class="val" id="fontVal">6</span></label>
         <input type="range" id="fontRange" min="3" max="16" value="6">
       </div>
-      <div class="field">
+      <div class="field" id="charsetFieldWrap">
         <label>문자 세트</label>
         <select id="charsetSelect">
           <option value="standard">표준 (10단계)</option>
@@ -253,6 +282,13 @@
   const colorCheck = document.getElementById('colorCheck');
   const baseColorInput = document.getElementById('baseColorInput');
   const baseColorWrap = document.getElementById('baseColorWrap');
+  const textModeCheck = document.getElementById('textModeCheck');
+  const textModeFields = document.getElementById('textModeFields');
+  const textModeContent = document.getElementById('textModeContent');
+  const textModeHighlightWords = document.getElementById('textModeHighlightWords');
+  const textModeHighlightColor = document.getElementById('textModeHighlightColor');
+  const textModeHighlightBold = document.getElementById('textModeHighlightBold');
+  const charsetFieldWrap = document.getElementById('charsetFieldWrap');
   const convertBtn = document.getElementById('convertBtn');
   const copyBtn = document.getElementById('copyBtn');
   const downloadTxtBtn = document.getElementById('downloadTxtBtn');
@@ -508,6 +544,69 @@
     return CHARSETS[charsetSelect.value];
   }
 
+  // 사용자가 입력한 글을 { ch, hl } 배열로 펼친다. hl=true인 구간은 강조 대상.
+  // 공백/줄바꿈은 하나의 스페이스로 정리하고, 강조 단어/구절은 가장 긴 것부터 우선 매칭한다.
+  function buildHighlightedCharStream(rawText, highlightWordsRaw) {
+    const normalized = rawText.replace(/\s+/g, ' ').trim();
+    const words = highlightWordsRaw
+      .split(',')
+      .map(w => w.trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+
+    const stream = [];
+    let i = 0;
+    while (i < normalized.length) {
+      let matched = null;
+      for (const w of words) {
+        if (w && normalized.startsWith(w, i)) { matched = w; break; }
+      }
+      if (matched) {
+        for (const ch of matched) stream.push({ ch, hl: true });
+        i += matched.length;
+      } else {
+        stream.push({ ch: normalized[i], hl: false });
+        i += 1;
+      }
+    }
+    return stream;
+  }
+
+  // 밝기 그리드에서 "안쪽" 칸만 골라 사용자 글로 순서대로 채운 그리드를 만든다.
+  // 글이 모자라면 처음부터 반복해서 실루엣을 끝까지 채운다.
+  function buildTextFillGrid(brightGrid, cols, rows, baseColor, useColor) {
+    const rawText = textModeContent.value.trim();
+    const source = rawText
+      ? buildHighlightedCharStream(rawText, textModeHighlightWords.value)
+      : [{ ch: '?', hl: false }];
+    const hlColor = textModeHighlightColor.value;
+    const hlBold = textModeHighlightBold.checked;
+    const INSIDE_THRESHOLD = 0.9; // 이 값보다 어두우면(=0에 가까우면) "안쪽"으로 판정
+
+    const grid = [];
+    let s = 0; // source 스트림 포인터 (반복 사용)
+    for (let y = 0; y < rows; y++) {
+      const line = [];
+      for (let x = 0; x < cols; x++) {
+        const { brightness, r, g, b } = brightGrid[y][x];
+        const inside = brightness < INSIDE_THRESHOLD;
+        if (!inside) {
+          line.push({ ch: ' ', color: null, bold: false });
+          continue;
+        }
+        const item = source[s % source.length];
+        s++;
+        line.push({
+          ch: item.ch,
+          color: item.hl ? hlColor : (useColor ? `rgb(${r},${g},${b})` : baseColor),
+          bold: item.hl && hlBold
+        });
+      }
+      grid.push(line);
+    }
+    return grid;
+  }
+
   async function convert() {
     if (!currentImage) return;
 
@@ -535,7 +634,7 @@
     const srcH = source.naturalHeight || source.height;
 
     const cellAspect = 0.55; // monospace cell height/width compensation
-    const rows = Math.max(1, Math.round((srcH / srcW) * cols * cellAspect));
+    let rows = Math.max(1, Math.round((srcH / srcW) * cols * cellAspect));
 
     workCanvas.width = cols;
     workCanvas.height = rows;
@@ -550,8 +649,8 @@
       return;
     }
 
-    // 1) 기본 문자 그리드 생성 (이미지 밝기 기반)
-    const grid = [];
+    // 0) 셀별 밝기값 계산 (두 모드 공통으로 사용)
+    const brightGrid = [];
     for (let y = 0; y < rows; y++) {
       const line = [];
       for (let x = 0; x < cols; x++) {
@@ -563,16 +662,41 @@
         brightness = Math.min(1, Math.max(0, (brightness - 0.5) * contrast + 0.5));
         if (invert) brightness = 1 - brightness;
 
-        const idx = Math.min(chars.length - 1, Math.floor((1 - brightness) * chars.length));
-        const finalChar = chars[idx];
-
-        line.push({
-          ch: finalChar,
-          color: useColor ? `rgb(${r},${g},${b})` : baseColor,
-          bold: false
-        });
+        line.push({ brightness, r, g, b });
       }
-      grid.push(line);
+      brightGrid.push(line);
+    }
+
+    // 1) 기본 문자 그리드 생성
+    let grid;
+    if (textModeCheck.checked) {
+      if (!textModeContent.value.trim()) {
+        // 채울 글이 비어있으면 '?'로 꽉 채우는 대신 안내만 보여준다.
+        outputWrap.innerHTML = '<div class="empty-state">위 "채울 글" 칸에 실루엣을 채울 글을 입력해주세요.</div>';
+        copyBtn.disabled = true;
+        downloadTxtBtn.disabled = true;
+        downloadPngBtn.disabled = true;
+        return;
+      }
+      // 밝기로 "안쪽/바깥쪽"만 판정하고, 안쪽 칸들을 사용자가 입력한 글로 순서대로 채운다.
+      grid = buildTextFillGrid(brightGrid, cols, rows, baseColor, useColor);
+    } else {
+      grid = [];
+      for (let y = 0; y < rows; y++) {
+        const line = [];
+        for (let x = 0; x < cols; x++) {
+          const { brightness, r, g, b } = brightGrid[y][x];
+          const idx = Math.min(chars.length - 1, Math.floor((1 - brightness) * chars.length));
+          const finalChar = chars[idx];
+
+          line.push({
+            ch: finalChar,
+            color: useColor ? `rgb(${r},${g},${b})` : baseColor,
+            bold: false
+          });
+        }
+        grid.push(line);
+      }
     }
 
     // 2) 사용자가 추가한 텍스트를 그리드 위에 덮어쓰기
@@ -588,6 +712,19 @@
         grid[yIndex][xi] = { ch: text[k], color: o.color, bold: !!o.bold };
       }
     });
+
+    // 2.5) 텍스트 모드에서는 줄과 줄 사이에 빈 줄을 끼워 넣어 뭉쳐 보이지 않게 한다.
+    if (textModeCheck.checked) {
+      const spaced = [];
+      for (let y = 0; y < grid.length; y++) {
+        spaced.push(grid[y]);
+        if (y < grid.length - 1) {
+          spaced.push(Array.from({ length: cols }, () => ({ ch: ' ', color: null, bold: false })));
+        }
+      }
+      grid = spaced;
+      rows = grid.length;
+    }
 
     // 3) 텍스트/HTML 출력 생성 (같은 스타일이 이어지면 span을 합쳐서 출력)
     let textOut = '';
@@ -654,10 +791,45 @@
   colorCheck.addEventListener('change', updateBaseColorState);
   updateBaseColorState();
 
+  function updateTextModeState() {
+    const on = textModeCheck.checked;
+    textModeFields.style.display = on ? 'block' : 'none';
+    // 텍스트 모드에서는 문자 세트/커스텀 문자 입력이 쓰이지 않으므로 숨긴다.
+    charsetFieldWrap.style.display = on ? 'none' : '';
+    if (on || charsetSelect.value !== 'custom') customChars.style.display = 'none';
+    if (!on && charsetSelect.value === 'custom') customChars.style.display = 'block';
+  }
+  const DENSITY_MAX_WIDTH = 300;
+  const TEXT_MODE_MAX_WIDTH = 90; // 이보다 촘촘하면 줄 사이 여백을 넣어도 뭉쳐 보인다
+
+  textModeCheck.addEventListener('change', () => {
+    updateTextModeState();
+    if (textModeCheck.checked) {
+      // 한글 음절은 획이 많아서 글자 크기가 작으면(8px 미만) 뭉개져 보인다.
+      // 가로 문자수도 너무 많으면 줄 사이 여백을 넣어도 다닥다닥 붙어 보이므로 상한을 낮춘다.
+      widthRange.max = String(TEXT_MODE_MAX_WIDTH);
+      if (parseInt(widthRange.value, 10) > TEXT_MODE_MAX_WIDTH || parseInt(widthRange.value, 10) >= 100) {
+        widthRange.value = '65';
+        widthVal.textContent = '65';
+      }
+      if (parseInt(fontRange.value, 10) < 11) {
+        fontRange.value = 12;
+        fontVal.textContent = '12';
+      }
+    } else {
+      widthRange.max = String(DENSITY_MAX_WIDTH);
+    }
+    if (currentImage) convert();
+  });
+  updateTextModeState();
+
   convertBtn.addEventListener('click', convert);
-  [widthRange, contrastRange, charsetSelect, customChars, invertCheck, colorCheck, baseColorInput].forEach(el => {
+  [widthRange, contrastRange, charsetSelect, customChars, invertCheck, colorCheck, baseColorInput,
+   textModeContent, textModeHighlightWords, textModeHighlightColor, textModeHighlightBold].forEach(el => {
     el.addEventListener('change', () => { if (currentImage) convert(); });
   });
+  textModeContent.addEventListener('input', () => { if (currentImage) convert(); });
+  textModeHighlightWords.addEventListener('input', () => { if (currentImage) convert(); });
   widthRange.addEventListener('mouseup', () => { if (currentImage) convert(); });
   contrastRange.addEventListener('mouseup', () => { if (currentImage) convert(); });
 
@@ -688,7 +860,18 @@
     const baseFontSize = parseInt(fontRange.value, 10);
     const SCALE = Math.max(2, Math.round(12 / baseFontSize)); // 작을수록 더 크게 확대 렌더링
     const fontSize = baseFontSize * SCALE;
-    const charW = fontSize * 0.6;
+
+    // 글자 폭을 라틴 문자 기준(0.6배)으로 고정하면 한글처럼 폭이 넓은 문자가 서로 겹쳐 붙어 보인다.
+    // 실제 사용하는 폰트로 폭을 재서, 가장 넓은 문자 기준으로 칸 너비를 잡는다.
+    const measureCtx = document.createElement('canvas').getContext('2d');
+    measureCtx.font = `${fontSize}px monospace`;
+    let charW = fontSize * 0.6;
+    ['A', 'W', '0', '@', '한', '글', '漢', '가'].forEach(ch => {
+      const w = measureCtx.measureText(ch).width;
+      if (w > charW) charW = w;
+    });
+    charW = Math.ceil(charW) + 1; // 살짝 여유
+
     const charH = fontSize;
     const padding = 10 * SCALE;
     const cols = lastCols;
