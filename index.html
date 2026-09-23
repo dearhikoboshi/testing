@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=1024">
 <title>이미지 → ASCII 아트 변환기</title>
 <style>
   :root {
@@ -594,7 +594,11 @@
       : [{ ch: '?', hl: false }];
     const hlColor = textModeHighlightColor.value;
     const hlBold = textModeHighlightBold.checked;
-    const INSIDE_THRESHOLD = 0.9; // 이 값보다 어두우면(=0에 가까우면) "안쪽"으로 판정
+    // 아스키(밀도) 모드는 살짝 밝은 가장자리 픽셀도 '.' 같은 아주 옅은 문자로 채워서
+    // 눈에는 여백처럼 보인다. 글로 채우기는 그 자리에 꽉 찬 글자를 넣기 때문에 같은
+    // 기준(0.9)을 쓰면 그 여백이 사라져 보인다. 경계를 더 엄격하게 잡아 옅은 가장자리는
+    // 아예 비워서, 아스키 모드에서 보이던 바깥 여백이 글로 채우기에도 남게 한다.
+    const INSIDE_THRESHOLD = 0.72; // 이 값보다 어두우면(=0에 가까우면) "안쪽"으로 판정
 
     const grid = [];
     let s = 0; // source 스트림 포인터 (반복 사용)
