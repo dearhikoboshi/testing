@@ -314,6 +314,7 @@
   let lastGrid = null;   // 2D array of { ch, color, bold }
   let lastCols = 0;
   let lastRows = 0;
+  let lastCellAspect = 0.6;
   let convertToken = 0; // 겹쳐 호출되는 비동기 변환 중 최신 결과만 반영하기 위한 토큰
 
   // ---- 인물만 추출 (배경 제거) ----
@@ -549,19 +550,25 @@
     return CHARSETS[charsetSelect.value];
   }
 
-  // 실제로 쓰일 글자들의 가로:세로 비율(너비/글자크기)을 재서 반환한다.
-  // 예전엔 이 값을 0.55로 고정해뒀는데, 실제 브라우저 monospace 폰트는 보통 그보다
-  // 넓어서(약 0.6) 모든 변환이 원본 사진보다 옆으로 늘어나 보이는 문제가 있었다.
-  // 문자 종류(영어는 좁고 한글은 거의 정사각형)에 따라서도 다르므로 항상 실측한다.
+  // 실제로 쓰일 글자들의 가로:세로 비율(너비/줄높이)을 잰다.
+  // Canvas의 measureText()는 실제 화면에 <pre>로 그려지는 것과 미묘하게 다를 수 있어서
+  // (폰트 힌팅/렌더링 경로 차이), 아예 화면과 똑같은 실제 <pre> 엘리먼트를 하나 만들어
+  // DOM 레이아웃에서 직접 재는 쪽이 기기별 오차가 훨씬 적다.
   function measureCharAspect(text, fallback) {
     const sample = (text || '').replace(/\s+/g, '').slice(0, 80);
     if (!sample) return fallback;
-    const measureCtx = document.createElement('canvas').getContext('2d');
-    const testSize = 100;
-    measureCtx.font = `${testSize}px ${FONT_STACK}`;
-    let total = 0;
-    for (const ch of sample) total += measureCtx.measureText(ch).width;
-    return (total / sample.length) / testSize;
+    const probe = document.createElement('pre');
+    probe.style.cssText = 'position:absolute; visibility:hidden; left:-9999px; top:0; ' +
+      'margin:0; padding:0; border:0; white-space:pre; line-height:1;';
+    probe.style.fontFamily = FONT_STACK;
+    probe.style.fontSize = '100px';
+    probe.textContent = sample;
+    document.body.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    const charW = rect.width / sample.length;
+    const charH = rect.height; // line-height:1이라 한 줄 높이 = 셀 높이
+    document.body.removeChild(probe);
+    return charW / charH;
   }
 
   // 사용자가 입력한 글을 { ch, hl } 배열로 펼친다. hl=true인 구간은 강조 대상.
@@ -811,6 +818,13 @@
     lastGrid = grid;
     lastCols = cols;
     lastRows = rows;
+    // 텍스트 모드는 중간에 빈 줄을 끼워 넣는 등 rows가 최종적으로 바뀔 수 있어서,
+    // 애초에 rows를 정할 때 썼던 effectiveCellAspect를 그대로 쓰면 다운로드 시
+    // 비율이 어긋난다(빈 줄 보정이 이중으로 적용됨). 그래서 "원본 사진 비율 ×
+    // (최종 rows/cols)"로 거꾸로 계산해, 실제로 만들어진 격자가 원본과 같은 비율이
+    // 되도록 만드는 글자 폭:높이 비율을 다시 구한다. 이렇게 하면 중간 계산 과정과
+    // 상관없이 미리보기·다운로드가 항상 원본 사진 비율과 일치한다.
+    lastCellAspect = (srcW / srcH) * (rows / cols);
 
     const pre = document.createElement('pre');
     pre.id = 'asciiOutput';
@@ -903,36 +917,29 @@
     const SCALE = Math.max(2, Math.round(12 / baseFontSize)); // 작을수록 더 크게 확대 렌더링
     const fontSize = baseFontSize * SCALE;
 
-    // 글자 폭을 라틴 문자 기준(0.6배)으로 고정하면 한글처럼 폭이 넓은 문자가 서로 겹쳐 붙어 보인다.
-    // 반대로 모든 글꼴을 다 넓은 한글 기준으로 재면, 한글을 전혀 안 쓰는 일반 변환까지
-    // 옆으로 늘어나 원본 사진 비율이 깨진다. 그래서 실제로 이 결과물에 등장하는 글자만 재서
-    // 가장 넓은 글자 기준으로 칸 너비를 잡는다.
-    const measureCtx = document.createElement('canvas').getContext('2d');
-    measureCtx.font = `${fontSize}px ${FONT_STACK}`;
-    const usedChars = new Set();
-    for (let y = 0; y < lastGrid.length; y++) {
-      for (let x = 0; x < lastGrid[y].length; x++) {
-        const ch = lastGrid[y][x].ch;
-        if (ch !== ' ') usedChars.add(ch);
-      }
-    }
-    let charW = fontSize * 0.6;
-    usedChars.forEach(ch => {
-      const w = measureCtx.measureText(ch).width;
-      if (w > charW) charW = w;
-    });
-    // 고정 +1px 여유를 더하면 작은 글자 크기에서는 실제 폭 대비 비중이 커져서
-    // 전체 그림이 옆으로 늘어나 원본 사진 비율이 깨진다. 비율 기반의 아주 작은 여유만 둔다.
-    charW = charW * 1.02;
-
+    // 미리보기(화면)의 가로세로 비율은 rows/cols를 계산할 때 이미 실측한
+    // lastCellAspect(그 시점의 실제 글자 폭:높이 비율)를 기준으로 결정돼 있다.
+    // 다운로드 캔버스에서 글자 폭을 따로(예: 개별 글자 중 가장 넓은 글자) 다시 재면,
+    // 모노스페이스 폰트라도 측정 방식 차이(평균 vs 최댓값, 폰트 크기별 힌팅 차이)로
+    // 아주 살짝 다른 값이 나와 화면과 다운로드 결과의 비율이 미묘하게 어긋난다.
+    // 그래서 새로 측정하지 않고, 미리보기를 만들 때 쓴 것과 똑같은 비율(lastCellAspect)로
+    // charW를 계산해 화면과 다운로드가 항상 정확히 같은 비율이 되도록 한다.
     const charH = fontSize;
-    const padding = 10 * SCALE;
+    const charW = charH * lastCellAspect;
     const cols = lastCols;
     const rows = lastRows;
+    const contentW = cols * charW;
+    const contentH = rows * charH;
+    // 여백을 고정 픽셀로 두면 가로/세로 중 어느 한쪽 비중이 더 커져서 비율이 미묘하게
+    // 틀어진다(정사각형이 아닌 사진일수록 티가 남). 그래서 가로/세로에 "같은 비율"의
+    // 여백을 둬서 최종 이미지 비율이 정확히 그대로 유지되게 한다.
+    const PAD_PCT = 0.03;
+    const padX = Math.max(10 * SCALE, contentW * PAD_PCT);
+    const padY = Math.max(10 * SCALE, contentH * PAD_PCT);
 
     const outCanvas = document.createElement('canvas');
-    outCanvas.width = Math.ceil(cols * charW) + padding * 2;
-    outCanvas.height = Math.ceil(rows * charH) + padding * 2;
+    outCanvas.width = Math.ceil(contentW) + Math.ceil(padX) * 2;
+    outCanvas.height = Math.ceil(contentH) + Math.ceil(padY) * 2;
     const octx = outCanvas.getContext('2d');
     octx.imageSmoothingEnabled = true;
     octx.imageSmoothingQuality = 'high';
@@ -952,7 +959,7 @@
         const wantFont = cell.bold ? boldFont : normalFont;
         if (wantFont !== currentFont) { octx.font = wantFont; currentFont = wantFont; }
         octx.fillStyle = cell.color || '#111111';
-        octx.fillText(cell.ch, padding + x * charW, padding + y * charH);
+        octx.fillText(cell.ch, padX + x * charW, padY + y * charH);
       }
     }
 
