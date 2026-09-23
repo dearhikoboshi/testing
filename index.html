@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1024">
+<title>이미지 → ASCII 아트 변환기</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f7f7f8;
+    --border: #dcdde0;
+    --text: #1a1a1a;
+    --muted: #6b6d72;
+    --accent: #0e9488;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 24px 16px 80px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .field input[type="range"] { width: 100%; }
+  .field .val { font-size: 12px; color: var(--accent); }
+  select, input[type="file"], input[type="text"] {
+    width: 100%;
+    background: #ffffff;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .drop.dragover { border-color: var(--accent); color: var(--accent); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: var(--accent);
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .output-wrap {
+    overflow: auto;
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    max-height: 70vh;
+  }
+  #asciiOutput {
+    white-space: pre;
+    font-family: "SF Mono", "Consolas", "Menlo", monospace;
+    line-height: 1;
+    padding: 12px;
+    margin: 0;
+    display: inline-block;
+    color: #111111;
+    background: #ffffff;
+  }
+  .toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .empty-state { color: var(--muted); font-size: 13px; padding: 40px 0; text-align: center; }
+  input[type="checkbox"] { accent-color: var(--accent); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
+
+  .overlay-row {
+    display: grid;
+    grid-template-columns: 1.4fr 70px 1fr 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .overlay-row:last-child { border-bottom: none; }
+  .overlay-row label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .overlay-row input[type="text"] { padding: 6px 8px; font-size: 13px; }
+  .overlay-row input[type="color"] {
+    width: 100%;
+    height: 32px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .overlay-row input[type="range"] { width: 100%; }
+  .overlay-remove {
+    background: transparent;
+    color: #c0392b;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    align-self: end;
+  }
+  .overlay-bold-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    align-self: end;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .overlay-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>이미지 → ASCII 아트 변환기</h1>
+  <p class="sub">이미지를 업로드하면 밝기 값을 기준으로 텍스트 아트로 변환합니다.</p>
+
+  <div class="panel">
+    <div class="drop" id="dropZone">
+      이미지를 여기에 드래그하거나 클릭해서 선택하세요<br>
+      <input type="file" id="fileInput" accept="image/*" style="margin-top:12px;">
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="controls">
+      <div class="field">
+        <label>가로 너비 (문자 수) <span class="val" id="widthVal">120</span></label>
+        <input type="range" id="widthRange" min="40" max="300" value="120">
+      </div>
+      <div class="field">
+        <label>밝기 대비 <span class="val" id="contrastVal">1.0</span></label>
+        <input type="range" id="contrastRange" min="0.3" max="2.5" step="0.1" value="1.0">
+      </div>
+      <div class="field">
+        <label>글자 크기(px) <span class="val" id="fontVal">6</span></label>
+        <input type="range" id="fontRange" min="3" max="16" value="6">
+      </div>
+      <div class="field">
+        <label>문자 세트</label>
+        <select id="charsetSelect">
+          <option value="standard">표준 (10단계)</option>
+          <option value="detailed">디테일 (긴 그라데이션)</option>
+          <option value="blocks">블록 문자</option>
+          <option value="binary">이진수 (0/1)</option>
+          <option value="custom">커스텀…</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="controls" style="margin-bottom:0;">
+      <input type="text" id="customChars" placeholder="예: @#*+=-:. (어두움→밝음 순)" style="display:none;">
+      <div class="toggle-row">
+        <input type="checkbox" id="invertCheck">
+        <label for="invertCheck">색상 반전</label>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="colorCheck">
+        <label for="colorCheck">원본 색상 유지</label>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="personOnlyCheck">
+        <label for="personOnlyCheck">인물만 추출 (배경 제거)</label>
+      </div>
+      <div class="field" id="baseColorWrap">
+        <label for="baseColorInput">글자 색상</label>
+        <input type="color" id="baseColorInput" value="#111111" style="height:34px; padding:2px; cursor:pointer;">
+      </div>
+    </div>
+
+    <div class="controls" id="personThresholdWrap" style="display:none; margin-top:16px; margin-bottom:0;">
+      <div class="field">
+        <label>인물 추출 민감도 <span class="val" id="personThresholdVal">50</span></label>
+        <input type="range" id="personThresholdRange" min="1" max="99" value="50">
+      </div>
+    </div>
+    <p class="sub" id="personOnlyStatus" style="display:none; margin:10px 0 0;"></p>
+
+    <div class="row" style="margin-top:16px;">
+      <button id="convertBtn" disabled>변환하기</button>
+      <button class="secondary" id="copyBtn" disabled>텍스트 복사</button>
+      <button class="secondary" id="downloadTxtBtn" disabled>.txt 다운로드</button>
+      <button class="secondary" id="downloadPngBtn" disabled>이미지로 다운로드</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px;">
+      <strong style="font-size:14px;">텍스트 삽입</strong>
+      <button class="secondary" id="addOverlayBtn" type="button">+ 텍스트 추가</button>
+    </div>
+    <p class="sub" style="margin:0 0 12px;">아스키 아트 위에 원하는 글씨를 원하는 위치와 색상으로 겹쳐 넣을 수 있습니다.</p>
+    <div id="overlayList"></div>
+  </div>
+
+  <div class="panel">
+    <div class="output-wrap" id="outputWrap">
+      <div class="empty-state">이미지를 업로드하면 여기에 결과가 표시됩니다.</div>
+    </div>
+  </div>
+</div>
+
+<canvas id="workCanvas" style="display:none;"></canvas>
+
+<script>
+(function () {
+  const CHARSETS = {
+    standard: " .:-=+*#%@",
+    detailed: " .'\`^\",:;Il!i><~+_-?][}{1)(|\\\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
+    blocks: " ░▒▓█",
+    binary: " 01"
+  };
+
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const widthRange = document.getElementById('widthRange');
+  const widthVal = document.getElementById('widthVal');
+  const contrastRange = document.getElementById('contrastRange');
+  const contrastVal = document.getElementById('contrastVal');
+  const fontRange = document.getElementById('fontRange');
+  const fontVal = document.getElementById('fontVal');
+  const charsetSelect = document.getElementById('charsetSelect');
+  const customChars = document.getElementById('customChars');
+  const invertCheck = document.getElementById('invertCheck');
+  const colorCheck = document.getElementById('colorCheck');
+  const baseColorInput = document.getElementById('baseColorInput');
+  const baseColorWrap = document.getElementById('baseColorWrap');
+  const convertBtn = document.getElementById('convertBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const downloadTxtBtn = document.getElementById('downloadTxtBtn');
+  const downloadPngBtn = document.getElementById('downloadPngBtn');
+  const outputWrap = document.getElementById('outputWrap');
+  const workCanvas = document.getElementById('workCanvas');
+  const ctx = workCanvas.getContext('2d', { willReadFrequently: true });
+  const overlayList = document.getElementById('overlayList');
+  const addOverlayBtn = document.getElementById('addOverlayBtn');
+  const personOnlyCheck = document.getElementById('personOnlyCheck');
+  const personThresholdWrap = document.getElementById('personThresholdWrap');
+  const personThresholdRange = document.getElementById('personThresholdRange');
+  const personThresholdVal = document.getElementById('personThresholdVal');
+  const personOnlyStatus = document.getElementById('personOnlyStatus');
+
+  let currentImage = null;
+  let lastAsciiText = '';
+  let lastGrid = null;   // 2D array of { ch, color, bold }
+  let lastCols = 0;
+  let lastRows = 0;
+  let convertToken = 0; // 겹쳐 호출되는 비동기 변환 중 최신 결과만 반영하기 위한 토큰
+
+  // ---- 인물만 추출 (배경 제거) ----
+  let selfieSegmentation = null;
+  let maskCache = null;        // { data: Uint8ClampedArray, w, h }
+  let maskCacheForImage = null;
+
+  function ensureSegmentation() {
+    if (selfieSegmentation) return selfieSegmentation;
+    if (typeof SelfieSegmentation === 'undefined') {
+      throw new Error('인물 추출 모델을 불러오지 못했습니다. 인터넷 연결을 확인해주세요.');
+    }
+    selfieSegmentation = new SelfieSegmentation({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+    });
+    selfieSegmentation.setOptions({ modelSelection: 1 });
+    return selfieSegmentation;
+  }
+
+  function runSegmentation(imgEl) {
+    return new Promise((resolve, reject) => {
+      try {
+        const seg = ensureSegmentation();
+        seg.onResults((results) => resolve(results.segmentationMask));
+        seg.send({ image: imgEl }).catch(reject);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  async function getMask(imgEl) {
+    if (maskCache && maskCacheForImage === imgEl) return maskCache;
+    const maskSource = await runSegmentation(imgEl);
+    const w = imgEl.naturalWidth || imgEl.width;
+    const h = imgEl.naturalHeight || imgEl.height;
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    const mctx = maskCanvas.getContext('2d');
+    mctx.drawImage(maskSource, 0, 0, w, h);
+    const data = mctx.getImageData(0, 0, w, h).data;
+    maskCache = { data, w, h };
+    maskCacheForImage = imgEl;
+    return maskCache;
+  }
+
+  // 인물만 남기고 배경을 흰색으로 지운 캔버스를 반환 (체크 해제 시 원본 그대로 반환)
+  async function getSourceForConversion() {
+    if (!personOnlyCheck.checked) return currentImage;
+
+    personOnlyStatus.style.display = 'block';
+    personOnlyStatus.textContent = '인물을 인식하는 중입니다…';
+
+    let mask;
+    try {
+      mask = await getMask(currentImage);
+    } catch (err) {
+      personOnlyStatus.textContent = '인물 인식에 실패했습니다. 인터넷 연결을 확인하거나 옵션을 꺼주세요.';
+      throw err;
+    }
+
+    const w = mask.w, h = mask.h;
+    const threshold = parseInt(personThresholdRange.value, 10) * 2.55;
+
+    const origCanvas = document.createElement('canvas');
+    origCanvas.width = w;
+    origCanvas.height = h;
+    const octx = origCanvas.getContext('2d');
+    octx.drawImage(currentImage, 0, 0, w, h);
+    const imgData = octx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+    const m = mask.data;
+
+    for (let p = 0; p < d.length; p += 4) {
+      if (m[p] < threshold) {
+        d[p] = 255; d[p + 1] = 255; d[p + 2] = 255; d[p + 3] = 255;
+      }
+    }
+    octx.putImageData(imgData, 0, 0);
+
+    personOnlyStatus.style.display = 'none';
+    return origCanvas;
+  }
+
+  // ---- 텍스트 삽입(오버레이) 관리 ----
+  let overlays = [];
+  let overlayIdSeq = 1;
+
+  function addOverlay(preset) {
+    overlays.push(Object.assign({
+      id: overlayIdSeq++,
+      text: 'TEXT',
+      color: '#ff3b30',
+      x: 50,   // 가로 위치 %
+      y: 50,   // 세로 위치 %
+      bold: true
+    }, preset || {}));
+    renderOverlayList();
+    if (currentImage) convert();
+  }
+
+  function removeOverlay(id) {
+    overlays = overlays.filter(o => o.id !== id);
+    renderOverlayList();
+    if (currentImage) convert();
+  }
+
+  function renderOverlayList() {
+    overlayList.innerHTML = '';
+    if (overlays.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'overlay-empty';
+      empty.textContent = '아직 추가된 텍스트가 없습니다. "+ 텍스트 추가"를 눌러보세요.';
+      overlayList.appendChild(empty);
+      return;
+    }
+    overlays.forEach(o => {
+      const row = document.createElement('div');
+      row.className = 'overlay-row';
+      row.innerHTML = `
+        <div>
+          <label>문구</label>
+          <input type="text" data-field="text" value="${o.text.replace(/"/g, '&quot;')}">
+        </div>
+        <div>
+          <label>색상</label>
+          <input type="color" data-field="color" value="${o.color}">
+        </div>
+        <div>
+          <label>가로 위치 (<span data-label="x">${o.x}</span>%)</label>
+          <input type="range" data-field="x" min="0" max="100" value="${o.x}">
+        </div>
+        <div>
+          <label>세로 위치 (<span data-label="y">${o.y}</span>%)</label>
+          <input type="range" data-field="y" min="0" max="100" value="${o.y}">
+        </div>
+        <div class="overlay-bold-wrap">
+          <input type="checkbox" data-field="bold" ${o.bold ? 'checked' : ''}>
+          <label style="margin:0;">굵게</label>
+        </div>
+        <button type="button" class="overlay-remove" data-remove="${o.id}">삭제</button>
+      `;
+      overlayList.appendChild(row);
+
+      const textInput = row.querySelector('[data-field="text"]');
+      const colorInput = row.querySelector('[data-field="color"]');
+      const xInput = row.querySelector('[data-field="x"]');
+      const yInput = row.querySelector('[data-field="y"]');
+      const boldInput = row.querySelector('[data-field="bold"]');
+      const removeBtn = row.querySelector('[data-remove]');
+      const xLabel = row.querySelector('[data-label="x"]');
+      const yLabel = row.querySelector('[data-label="y"]');
+
+      textInput.addEventListener('input', () => { o.text = textInput.value; if (currentImage) convert(); });
+      colorInput.addEventListener('input', () => { o.color = colorInput.value; if (currentImage) convert(); });
+      xInput.addEventListener('input', () => {
+        o.x = parseInt(xInput.value, 10);
+        xLabel.textContent = o.x;
+        if (currentImage) convert();
+      });
+      yInput.addEventListener('input', () => {
+        o.y = parseInt(yInput.value, 10);
+        yLabel.textContent = o.y;
+        if (currentImage) convert();
+      });
+      boldInput.addEventListener('change', () => { o.bold = boldInput.checked; if (currentImage) convert(); });
+      removeBtn.addEventListener('click', () => removeOverlay(o.id));
+    });
+  }
+
+  addOverlayBtn.addEventListener('click', () => addOverlay());
+
+  personOnlyCheck.addEventListener('change', () => {
+    personThresholdWrap.style.display = personOnlyCheck.checked ? 'grid' : 'none';
+    if (currentImage) convert();
+  });
+  personThresholdRange.addEventListener('input', () => {
+    personThresholdVal.textContent = personThresholdRange.value;
+  });
+  personThresholdRange.addEventListener('change', () => {
+    if (currentImage) convert();
+  });
+
+  widthRange.addEventListener('input', () => widthVal.textContent = widthRange.value);
+  contrastRange.addEventListener('input', () => contrastVal.textContent = parseFloat(contrastRange.value).toFixed(1));
+  fontRange.addEventListener('input', () => {
+    fontVal.textContent = fontRange.value;
+    const pre = document.getElementById('asciiOutput');
+    if (pre) pre.style.fontSize = fontRange.value + 'px';
+  });
+
+  charsetSelect.addEventListener('change', () => {
+    customChars.style.display = charsetSelect.value === 'custom' ? 'block' : 'none';
+  });
+
+  function loadFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        currentImage = img;
+        convertBtn.disabled = false;
+        convert();
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  fileInput.addEventListener('change', (e) => loadFile(e.target.files[0]));
+  dropZone.addEventListener('click', (e) => {
+    // input을 직접 탭한 경우엔 그대로 두고, 그 외 영역을 탭했을 때만 클릭을 위임한다.
+    // (안 그러면 iOS Safari에서 input 자체 클릭 + 버블링된 dropZone 클릭이 겹쳐
+    //  사진 선택 시트가 열리자마자 닫히는 문제가 생김)
+    if (e.target === fileInput) return;
+    fileInput.click();
+  });
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) loadFile(file);
+  });
+
+  function getCharset() {
+    if (charsetSelect.value === 'custom') {
+      return customChars.value.trim() || CHARSETS.standard;
+    }
+    return CHARSETS[charsetSelect.value];
+  }
+
+  async function convert() {
+    if (!currentImage) return;
+
+    const myToken = ++convertToken;
+    let source;
+    try {
+      source = await getSourceForConversion();
+    } catch (err) {
+      if (myToken !== convertToken) return;
+      personOnlyCheck.checked = false;
+      personThresholdWrap.style.display = 'none';
+      source = currentImage;
+    }
+    if (myToken !== convertToken) return; // 더 최신 변환 요청이 들어온 경우 이 결과는 버림
+
+    const cols = parseInt(widthRange.value, 10);
+    const contrast = parseFloat(contrastRange.value);
+    const invert = invertCheck.checked;
+    const useColor = colorCheck.checked;
+    const baseColor = baseColorInput.value;
+    const chars = getCharset();
+    const fontSize = parseInt(fontRange.value, 10);
+
+    const srcW = source.naturalWidth || source.width;
+    const srcH = source.naturalHeight || source.height;
+
+    const cellAspect = 0.55; // monospace cell height/width compensation
+    const rows = Math.max(1, Math.round((srcH / srcW) * cols * cellAspect));
+
+    workCanvas.width = cols;
+    workCanvas.height = rows;
+    ctx.clearRect(0, 0, cols, rows);
+    ctx.drawImage(source, 0, 0, cols, rows);
+
+    let pixels;
+    try {
+      pixels = ctx.getImageData(0, 0, cols, rows).data;
+    } catch (err) {
+      outputWrap.innerHTML = '<div class="empty-state">이미지를 읽는 중 오류가 발생했습니다. (외부 URL 이미지는 CORS 제한으로 실패할 수 있습니다)</div>';
+      return;
+    }
+
+    // 1) 기본 문자 그리드 생성 (이미지 밝기 기반)
+    const grid = [];
+    for (let y = 0; y < rows; y++) {
+      const line = [];
+      for (let x = 0; x < cols; x++) {
+        const i = (y * cols + x) * 4;
+        const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3];
+
+        let brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        if (a < 255) brightness = brightness * (a / 255) + (1 - a / 255);
+        brightness = Math.min(1, Math.max(0, (brightness - 0.5) * contrast + 0.5));
+        if (invert) brightness = 1 - brightness;
+
+        const idx = Math.min(chars.length - 1, Math.floor((1 - brightness) * chars.length));
+        const finalChar = chars[idx];
+
+        line.push({
+          ch: finalChar,
+          color: useColor ? `rgb(${r},${g},${b})` : baseColor,
+          bold: false
+        });
+      }
+      grid.push(line);
+    }
+
+    // 2) 사용자가 추가한 텍스트를 그리드 위에 덮어쓰기
+    overlays.forEach(o => {
+      const text = (o.text || '').trim();
+      if (!text) return;
+      const yIndex = Math.min(rows - 1, Math.max(0, Math.round((o.y / 100) * (rows - 1))));
+      let xStart = Math.round((o.x / 100) * cols) - Math.floor(text.length / 2);
+      xStart = Math.max(0, Math.min(cols - 1, xStart));
+      for (let k = 0; k < text.length; k++) {
+        const xi = xStart + k;
+        if (xi < 0 || xi >= cols) continue;
+        grid[yIndex][xi] = { ch: text[k], color: o.color, bold: !!o.bold };
+      }
+    });
+
+    // 3) 텍스트/HTML 출력 생성 (같은 스타일이 이어지면 span을 합쳐서 출력)
+    let textOut = '';
+    let htmlOut = '';
+    for (let y = 0; y < rows; y++) {
+      let lineText = '';
+      let lineHtml = '';
+      let runColor = undefined, runBold = undefined, runBuf = '';
+
+      const flushRun = () => {
+        if (!runBuf) return;
+        const escaped = runBuf.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '&nbsp;');
+        if (runColor || runBold) {
+          const styleParts = [];
+          if (runColor) styleParts.push(`color:${runColor}`);
+          if (runBold) styleParts.push('font-weight:700');
+          lineHtml += `<span style="${styleParts.join(';')}">${escaped}</span>`;
+        } else {
+          lineHtml += escaped;
+        }
+        runBuf = '';
+      };
+
+      for (let x = 0; x < cols; x++) {
+        const cell = grid[y][x];
+        lineText += cell.ch;
+
+        if (cell.color !== runColor || cell.bold !== runBold) {
+          flushRun();
+          runColor = cell.color;
+          runBold = cell.bold;
+        }
+        runBuf += cell.ch;
+      }
+      flushRun();
+
+      textOut += lineText + '\n';
+      htmlOut += lineHtml + '\n';
+    }
+
+    lastAsciiText = textOut;
+    lastGrid = grid;
+    lastCols = cols;
+    lastRows = rows;
+
+    const pre = document.createElement('pre');
+    pre.id = 'asciiOutput';
+    pre.style.fontSize = fontSize + 'px';
+    pre.innerHTML = htmlOut;
+
+    outputWrap.innerHTML = '';
+    outputWrap.appendChild(pre);
+
+    copyBtn.disabled = false;
+    downloadTxtBtn.disabled = false;
+    downloadPngBtn.disabled = false;
+  }
+
+  function updateBaseColorState() {
+    const disabled = colorCheck.checked;
+    baseColorInput.disabled = disabled;
+    baseColorWrap.style.opacity = disabled ? '0.4' : '1';
+  }
+  colorCheck.addEventListener('change', updateBaseColorState);
+  updateBaseColorState();
+
+  convertBtn.addEventListener('click', convert);
+  [widthRange, contrastRange, charsetSelect, customChars, invertCheck, colorCheck, baseColorInput].forEach(el => {
+    el.addEventListener('change', () => { if (currentImage) convert(); });
+  });
+  widthRange.addEventListener('mouseup', () => { if (currentImage) convert(); });
+  contrastRange.addEventListener('mouseup', () => { if (currentImage) convert(); });
+
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(lastAsciiText);
+      copyBtn.textContent = '복사됨!';
+      setTimeout(() => copyBtn.textContent = '텍스트 복사', 1200);
+    } catch (err) {
+      alert('클립보드 복사에 실패했습니다.');
+    }
+  });
+
+  downloadTxtBtn.addEventListener('click', () => {
+    const blob = new Blob([lastAsciiText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'ascii-art.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  downloadPngBtn.addEventListener('click', () => {
+    if (!lastGrid) return;
+
+    // 화면 글자 크기가 작아도(예: 6px) 선명하게 저장되도록 배율을 올려서 렌더링
+    const baseFontSize = parseInt(fontRange.value, 10);
+    const SCALE = Math.max(2, Math.round(12 / baseFontSize)); // 작을수록 더 크게 확대 렌더링
+    const fontSize = baseFontSize * SCALE;
+    const charW = fontSize * 0.6;
+    const charH = fontSize;
+    const padding = 10 * SCALE;
+    const cols = lastCols;
+    const rows = lastRows;
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = Math.ceil(cols * charW) + padding * 2;
+    outCanvas.height = Math.ceil(rows * charH) + padding * 2;
+    const octx = outCanvas.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = 'high';
+    octx.fillStyle = '#ffffff';
+    octx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+    octx.textBaseline = 'top';
+
+    const normalFont = `${fontSize}px monospace`;
+    const boldFont = `bold ${fontSize}px monospace`;
+    let currentFont = normalFont;
+    octx.font = currentFont;
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const cell = lastGrid[y][x];
+        if (cell.ch === ' ') continue;
+        const wantFont = cell.bold ? boldFont : normalFont;
+        if (wantFont !== currentFont) { octx.font = wantFont; currentFont = wantFont; }
+        octx.fillStyle = cell.color || '#111111';
+        octx.fillText(cell.ch, padding + x * charW, padding + y * charH);
+      }
+    }
+
+    outCanvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ascii-art.png';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  });
+
+  renderOverlayList();
+})();
+</script>
+</body>
+</html>
