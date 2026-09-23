@@ -865,11 +865,20 @@
     const fontSize = baseFontSize * SCALE;
 
     // 글자 폭을 라틴 문자 기준(0.6배)으로 고정하면 한글처럼 폭이 넓은 문자가 서로 겹쳐 붙어 보인다.
-    // 실제 사용하는 폰트로 폭을 재서, 가장 넓은 문자 기준으로 칸 너비를 잡는다.
+    // 반대로 모든 글꼴을 다 넓은 한글 기준으로 재면, 한글을 전혀 안 쓰는 일반 변환까지
+    // 옆으로 늘어나 원본 사진 비율이 깨진다. 그래서 실제로 이 결과물에 등장하는 글자만 재서
+    // 가장 넓은 글자 기준으로 칸 너비를 잡는다.
     const measureCtx = document.createElement('canvas').getContext('2d');
     measureCtx.font = `${fontSize}px monospace`;
+    const usedChars = new Set();
+    for (let y = 0; y < lastGrid.length; y++) {
+      for (let x = 0; x < lastGrid[y].length; x++) {
+        const ch = lastGrid[y][x].ch;
+        if (ch !== ' ') usedChars.add(ch);
+      }
+    }
     let charW = fontSize * 0.6;
-    ['A', 'W', '0', '@', '한', '글', '漢', '가'].forEach(ch => {
+    usedChars.forEach(ch => {
       const w = measureCtx.measureText(ch).width;
       if (w > charW) charW = w;
     });
