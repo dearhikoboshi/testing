@@ -634,7 +634,10 @@
     const srcH = source.naturalHeight || source.height;
 
     const cellAspect = 0.55; // monospace cell height/width compensation
-    let rows = Math.max(1, Math.round((srcH / srcW) * cols * cellAspect));
+    // 텍스트 모드는 뒤에서 줄 사이에 빈 줄을 끼워 넣어 세로 길이가 대략 2배가 되므로,
+    // 미리 절반 높이로 계산해둬야 최종 결과가 원본 사진 비율대로 나온다.
+    const effectiveCellAspect = textModeCheck.checked ? cellAspect / 2 : cellAspect;
+    let rows = Math.max(1, Math.round((srcH / srcW) * cols * effectiveCellAspect));
 
     workCanvas.width = cols;
     workCanvas.height = rows;
