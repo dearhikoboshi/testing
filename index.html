@@ -633,10 +633,11 @@
     const srcW = source.naturalWidth || source.width;
     const srcH = source.naturalHeight || source.height;
 
-    const cellAspect = 0.55; // monospace cell height/width compensation
-    // 텍스트 모드는 뒤에서 줄 사이에 빈 줄을 끼워 넣어 세로 길이가 대략 2배가 되므로,
-    // 미리 절반 높이로 계산해둬야 최종 결과가 원본 사진 비율대로 나온다.
-    const effectiveCellAspect = textModeCheck.checked ? cellAspect / 2 : cellAspect;
+    const cellAspect = 0.55; // 일반 문자(ASCII) 기준 monospace 셀 가로:세로 비율
+    const HANGUL_CELL_ASPECT = 1.0; // 한글 음절은 가로:세로가 거의 1:1이라 ASCII보다 훨씬 넓다
+    // 텍스트 모드는 (1) 실제로 한글처럼 폭이 넓은 글자를 쓰고, (2) 뒤에서 줄 사이에 빈 줄을
+    // 끼워 넣어 세로 길이가 대략 2배가 되므로, 두 가지를 미리 반영해야 원본 사진 비율대로 나온다.
+    const effectiveCellAspect = textModeCheck.checked ? HANGUL_CELL_ASPECT / 2 : cellAspect;
     let rows = Math.max(1, Math.round((srcH / srcW) * cols * effectiveCellAspect));
 
     workCanvas.width = cols;
@@ -882,7 +883,9 @@
       const w = measureCtx.measureText(ch).width;
       if (w > charW) charW = w;
     });
-    charW = Math.ceil(charW) + 1; // 살짝 여유
+    // 고정 +1px 여유를 더하면 작은 글자 크기에서는 실제 폭 대비 비중이 커져서
+    // 전체 그림이 옆으로 늘어나 원본 사진 비율이 깨진다. 비율 기반의 아주 작은 여유만 둔다.
+    charW = charW * 1.02;
 
     const charH = fontSize;
     const padding = 10 * SCALE;
