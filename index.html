@@ -662,7 +662,19 @@
     workCanvas.width = cols;
     workCanvas.height = rows;
     ctx.clearRect(0, 0, cols, rows);
-    ctx.drawImage(source, 0, 0, cols, rows);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, cols, rows);
+    if (textModeCheck.checked) {
+      // 아스키(밀도) 모드는 사진 자체의 여백 덕에 가장자리가 비어 보이지만,
+      // 글로 채우기는 경계까지 꽉 채우는 편이라 그런 여백이 잘 안 남는다.
+      // 그림을 살짝 작게 그려서 사방에 일부러 여백을 둔다.
+      const TEXT_MODE_MARGIN = 0.08; // 상하좌우 각 8%
+      const mx = Math.round(cols * TEXT_MODE_MARGIN);
+      const my = Math.round(rows * TEXT_MODE_MARGIN);
+      ctx.drawImage(source, mx, my, Math.max(1, cols - mx * 2), Math.max(1, rows - my * 2));
+    } else {
+      ctx.drawImage(source, 0, 0, cols, rows);
+    }
 
     let pixels;
     try {
