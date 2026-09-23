@@ -544,11 +544,13 @@
     return CHARSETS[charsetSelect.value];
   }
 
-  // 실제로 채울 글자들의 가로:세로 비율(너비/글자크기)을 재서 반환한다.
-  // 영어는 좁고(약 0.6) 한글은 거의 정사각형(약 1.0)이라 입력한 글에 따라 실측해야 한다.
-  function measureTextModeCharAspect(text) {
-    const sample = text.replace(/\s+/g, '').slice(0, 80);
-    if (!sample) return 1.0; // 아직 아무 글도 없으면 넓은 쪽(한글)으로 가정해 안전하게 잡는다
+  // 실제로 쓰일 글자들의 가로:세로 비율(너비/글자크기)을 재서 반환한다.
+  // 예전엔 이 값을 0.55로 고정해뒀는데, 실제 브라우저 monospace 폰트는 보통 그보다
+  // 넓어서(약 0.6) 모든 변환이 원본 사진보다 옆으로 늘어나 보이는 문제가 있었다.
+  // 문자 종류(영어는 좁고 한글은 거의 정사각형)에 따라서도 다르므로 항상 실측한다.
+  function measureCharAspect(text, fallback) {
+    const sample = (text || '').replace(/\s+/g, '').slice(0, 80);
+    if (!sample) return fallback;
     const measureCtx = document.createElement('canvas').getContext('2d');
     const testSize = 100;
     measureCtx.font = `${testSize}px monospace`;
@@ -650,13 +652,13 @@
     const srcW = source.naturalWidth || source.width;
     const srcH = source.naturalHeight || source.height;
 
-    const cellAspect = 0.55; // 일반 문자(ASCII) 기준 monospace 셀 가로:세로 비율
+    // 일반 모드는 실제로 쓰이는 문자 세트(예: " .:-=+*#%@")를 실측해서 셀 비율을 구한다.
     // 텍스트 모드는 (1) 실제로 입력한 글(영어는 좁고 한글은 거의 정사각형)을 쓰고,
     // (2) 뒤에서 줄 사이에 빈 줄을 끼워 넣어 세로 길이가 대략 2배가 되므로,
     // 두 가지를 미리 반영해야 원본 사진 비율대로 나온다.
     const effectiveCellAspect = textModeCheck.checked
-      ? measureTextModeCharAspect(textModeContent.value) / 2
-      : cellAspect;
+      ? measureCharAspect(textModeContent.value, 1.0) / 2
+      : measureCharAspect(chars, 0.6);
     let rows = Math.max(1, Math.round((srcH / srcW) * cols * effectiveCellAspect));
 
     workCanvas.width = cols;
