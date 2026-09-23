@@ -261,6 +261,11 @@
 
 <script>
 (function () {
+  // 화면에 실제로 그려지는 #asciiOutput의 font-family와 반드시 똑같아야 한다.
+  // 여기가 어긋나면(예: 그냥 'monospace'만 쓰면) 기기마다 실제 렌더링 폰트와
+  // 측정에 쓰는 폰트가 달라져서 비율 계산이 기기별로 틀어진다.
+  const FONT_STACK = '"SF Mono", "Consolas", "Menlo", monospace';
+
   const CHARSETS = {
     standard: " .:-=+*#%@",
     detailed: " .'\`^\",:;Il!i><~+_-?][}{1)(|\\\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
@@ -553,7 +558,7 @@
     if (!sample) return fallback;
     const measureCtx = document.createElement('canvas').getContext('2d');
     const testSize = 100;
-    measureCtx.font = `${testSize}px monospace`;
+    measureCtx.font = `${testSize}px ${FONT_STACK}`;
     let total = 0;
     for (const ch of sample) total += measureCtx.measureText(ch).width;
     return (total / sample.length) / testSize;
@@ -903,7 +908,7 @@
     // 옆으로 늘어나 원본 사진 비율이 깨진다. 그래서 실제로 이 결과물에 등장하는 글자만 재서
     // 가장 넓은 글자 기준으로 칸 너비를 잡는다.
     const measureCtx = document.createElement('canvas').getContext('2d');
-    measureCtx.font = `${fontSize}px monospace`;
+    measureCtx.font = `${fontSize}px ${FONT_STACK}`;
     const usedChars = new Set();
     for (let y = 0; y < lastGrid.length; y++) {
       for (let x = 0; x < lastGrid[y].length; x++) {
@@ -935,8 +940,8 @@
     octx.fillRect(0, 0, outCanvas.width, outCanvas.height);
     octx.textBaseline = 'top';
 
-    const normalFont = `${fontSize}px monospace`;
-    const boldFont = `bold ${fontSize}px monospace`;
+    const normalFont = `${fontSize}px ${FONT_STACK}`;
+    const boldFont = `bold ${fontSize}px ${FONT_STACK}`;
     let currentFont = normalFont;
     octx.font = currentFont;
 
